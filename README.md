@@ -12,7 +12,7 @@ A tool to analyze language usage across a GitHub user's repositories, available 
 
 ## 📦 Example Output
 
-
+![example](image.png)
 
 ### Running
 ```bash
