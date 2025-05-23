@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -72,6 +73,71 @@ func fetchGitHubData(url string) ([]byte, error) {
 	return body, nil
 }
 
+func getLanguageStats(username string) ([]LanguageStats, error) {
+	reposURL := fmt.Sprintf("https://api.github.com/users/%s/repos?per_page=100", username)
+	reposBody, err := fetchGitHubData(reposURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch repositories: %v", err)
+	}
+
+	var repos []Repo
+	if err := json.Unmarshal(reposBody, &repos); err != nil {
+		return nil, fmt.Errorf("failed to parse repository data: %v", err)
+	}
+
+	if len(repos) == 0 {
+		return nil, fmt.Errorf("no repositories found for user %s", username)
+	}
+
+	languageStats := make(map[string]int64)
+	for _, repo := range repos {
+		if repo.LanguagesURL == "" {
+			continue
+		}
+
+		langBody, err := fetchGitHubData(repo.LanguagesURL)
+		if err != nil {
+			log.Printf("Warning: Error fetching languages for repo: %v", err)
+			continue
+		}
+
+		var langData map[string]int64
+		if err := json.Unmarshal(langBody, &langData); err != nil {
+			log.Printf("Warning: Error parsing languages: %v", err)
+			continue
+		}
+
+		for lang, bytes := range langData {
+			languageStats[lang] += bytes
+		}
+	}
+
+	var totalBytes int64
+	for _, bytes := range languageStats {
+		totalBytes += bytes
+	}
+
+	if totalBytes == 0 {
+		return nil, fmt.Errorf("no language data found in repositories")
+	}
+
+	var result []LanguageStats
+	for lang, bytes := range languageStats {
+		percent := (float64(bytes) / float64(totalBytes)) * 100
+		result = append(result, LanguageStats{
+			Language: lang,
+			Percent:  math.Round(percent*100) / 100,
+			Bytes:    bytes,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Percent > result[j].Percent
+	})
+
+	return result, nil
+}
+
 func handler(w http.ResponseWriter, r *http.Request) {
 	enableCors(&w)
 	w.Header().Set("Content-Type", "application/json")
@@ -92,79 +158,58 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reposURL := fmt.Sprintf("https://api.github.com/users/%s/repos?per_page=100", username)
-	reposBody, err := fetchGitHubData(reposURL)
+	result, err := getLanguageStats(username)
 	if err != nil {
-		log.Printf("Error fetching repositories: %v", err)
-		writeJSONError(w, fmt.Sprintf("Failed to fetch repositories: %v", err), http.StatusInternalServerError)
+		log.Printf("Error getting language stats: %v", err)
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	var repos []Repo
-	if err := json.Unmarshal(reposBody, &repos); err != nil {
-		log.Printf("Error parsing repositories: %v", err)
-		writeJSONError(w, "Failed to parse repository data", http.StatusInternalServerError)
-		return
-	}
-
-	if len(repos) == 0 {
-		writeJSONError(w, "No repositories found for this user", http.StatusNotFound)
-		return
-	}
-
-	languageStats := make(map[string]int64)
-	for _, repo := range repos {
-		if repo.LanguagesURL == "" {
-			continue
-		}
-
-		langBody, err := fetchGitHubData(repo.LanguagesURL)
-		if err != nil {
-			log.Printf("Error fetching languages for repo: %v", err)
-			continue
-		}
-
-		var langData map[string]int64
-		if err := json.Unmarshal(langBody, &langData); err != nil {
-			log.Printf("Error parsing languages: %v", err)
-			continue
-		}
-
-		for lang, bytes := range langData {
-			languageStats[lang] += bytes
-		}
-	}
-
-	var totalBytes int64
-	for _, bytes := range languageStats {
-		totalBytes += bytes
-	}
-
-	if totalBytes == 0 {
-		writeJSONError(w, "No language data found in repositories", http.StatusNotFound)
-		return
-	}
-
-	var result []LanguageStats
-	for lang, bytes := range languageStats {
-		percent := (float64(bytes) / float64(totalBytes)) * 100
-		result = append(result, LanguageStats{
-			Language: lang,
-			Percent:  math.Round(percent*100) / 100,
-			Bytes:    bytes,
-		})
-	}
-
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Percent > result[j].Percent
-	})
 
 	w.Header().Set("X-RateLimit-Info", "GitHub API rate limits apply. Add GITHUB_TOKEN for higher limits.")
-
 	json.NewEncoder(w).Encode(result)
 }
 
+func printStatsCLI(username string) {
+	fmt.Printf("Fetching language stats for GitHub user: %s\n", username)
+	
+	result, err := getLanguageStats(username)
+	if err != nil {
+		log.Fatalf("Error: %v", err)
+	}
+
+	fmt.Println("\nLanguage Statistics:")
+	fmt.Println("----------------------------------------")
+	fmt.Printf("%-20s %10s %10s\n", "LANGUAGE", "PERCENT", "BYTES")
+	fmt.Println("----------------------------------------")
+	for _, stat := range result {
+		fmt.Printf("%-20s %9.2f%% %10d\n", stat.Language, stat.Percent, stat.Bytes)
+	}
+	fmt.Println("----------------------------------------")
+	
+	var totalBytes int64
+	for _, stat := range result {
+		totalBytes += stat.Bytes
+	}
+	fmt.Printf("%-20s %10s %10d\n", "TOTAL", "", totalBytes)
+}
+
 func main() {
+	// Parse CLI flags
+	cliMode := flag.Bool("cli", false, "Run in CLI mode")
+	username := flag.String("user", "", "GitHub username to analyze")
+	flag.Parse()
+
+	if *cliMode {
+		if *username == "" {
+			fmt.Println("Error: username is required in CLI mode")
+			fmt.Println("Usage: program -cli -user <username>")
+			os.Exit(1)
+		}
+		printStatsCLI(*username)
+		return
+	}
+
+	// Otherwise start HTTP server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -178,6 +223,7 @@ func main() {
 		log.Println("Using GITHUB_TOKEN for authentication")
 	}
 	log.Printf("Access the endpoint at: http://localhost:%s/languages?username=USERNAME", port)
+	log.Println("Or use CLI mode: program -cli -user USERNAME")
 
 	http.HandleFunc("/languages", handler)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
