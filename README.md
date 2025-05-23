@@ -1,20 +1,20 @@
 # 🧑‍💻 GitHub Language Stats API
 
-A simple Go API that fetches all public repositories of a GitHub user and returns the percentage breakdown of programming languages used.
+A tool to analyze language usage across a GitHub user's repositories, available as both a web service and CLI tool.
 
 ## 🚀 Features
 
-- Get all programming languages used by a GitHub user.
-- Percentage calculation based on bytes of code.
-- Simple REST API built with Go.
-- No authentication required (unless rate-limited).
+-  Get language statistics for any GitHub user
+-  Web server mode with JSON API
+-  CLI mode with pretty-printed output
+-  Supports both authenticated (with token) and unauthenticated requests
+-  Lightweight and easy to deploy
 
 ## 📦 Example Output
 
-```json
-{
-  "Go": 53.41,
-  "JavaScript": 28.12,
-  "Python": 18.47
-}
+
+
+### Running
+```bash
+github-lang-analyzer -cli -user <username>
 ```

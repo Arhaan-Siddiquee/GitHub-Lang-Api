@@ -194,7 +194,6 @@ func printStatsCLI(username string) {
 }
 
 func main() {
-	// Parse CLI flags
 	cliMode := flag.Bool("cli", false, "Run in CLI mode")
 	username := flag.String("user", "", "GitHub username to analyze")
 	flag.Parse()
@@ -209,7 +208,6 @@ func main() {
 		return
 	}
 
-	// Otherwise start HTTP server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
